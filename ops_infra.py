@@ -683,8 +683,20 @@ def _get_crash_events(exe_name, days=2):
 
 def _check_stream_folders(cameras):
     results = []
-    seen    = set()
-    cutoff  = time.time() - 3600
+    seen   = set()
+    cutoff = time.time() - 3600
+
+    try:
+        all_folders = [e for e in os.listdir(STREAM_FOLDER_ROOT)
+                       if os.path.isdir(os.path.join(STREAM_FOLDER_ROOT, e))]
+    except Exception:
+        all_folders = []
+
+    def _mtime(fname):
+        try:
+            return os.path.getmtime(os.path.join(STREAM_FOLDER_ROOT, fname))
+        except Exception:
+            return 0
 
     for cam in cameras:
         sid = (cam.get("stream_id") or cam.get("stream_name") or "").strip()
@@ -692,44 +704,52 @@ def _check_stream_folders(cameras):
             continue
         seen.add(sid)
 
-        folder        = os.path.join(STREAM_FOLDER_ROOT, sid)
-        folder_exists = os.path.isdir(folder)
+        matching = [f for f in all_folders if f.startswith(sid)]
+
+        if not matching:
+            results.append({
+                "stream_id":        sid,
+                "camera_number":    cam.get("camera_number", "—"),
+                "ip":               cam.get("ip", "—"),
+                "folder_exists":    False,
+                "last_modified":    None,
+                "recent_images_1h": 0,
+                "total_images":     0,
+                "status":           "missing",
+            })
+            continue
+
+        best   = max(matching, key=_mtime)
+        folder = os.path.join(STREAM_FOLDER_ROOT, best)
+
         last_modified = None
         recent        = 0
         total         = 0
 
-        if folder_exists:
-            try:
-                last_modified = datetime.datetime.fromtimestamp(
-                    os.path.getmtime(folder)).isoformat()
-            except Exception:
-                pass
-            try:
-                for fn in os.listdir(folder):
-                    if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.webp')):
-                        total += 1
-                        try:
-                            if os.path.getmtime(os.path.join(folder, fn)) > cutoff:
-                                recent += 1
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+        try:
+            last_modified = datetime.datetime.fromtimestamp(
+                os.path.getmtime(folder)).isoformat()
+        except Exception:
+            pass
+        try:
+            for fn in os.listdir(folder):
+                if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.webp')):
+                    total += 1
+                    try:
+                        if os.path.getmtime(os.path.join(folder, fn)) > cutoff:
+                            recent += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
-        if recent > 0:
-            status = "active"
-        elif folder_exists and total > 0:
-            status = "stale"
-        elif folder_exists:
-            status = "empty"
-        else:
-            status = "missing"
+        status = "active" if recent > 0 else ("stale" if total > 0 else "empty")
 
         results.append({
             "stream_id":        sid,
             "camera_number":    cam.get("camera_number", "—"),
             "ip":               cam.get("ip", "—"),
-            "folder_exists":    folder_exists,
+            "folder_exists":    True,
             "last_modified":    last_modified,
             "recent_images_1h": recent,
             "total_images":     total,
