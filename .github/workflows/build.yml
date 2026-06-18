@@ -1,0 +1,66 @@
+name: Build OPS-Infra
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops_infra.py'
+      - 'requirements.txt'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write config.json (no BOM)
+        shell: pwsh
+        run: |
+          $json = @{
+            dashboard_base_url = "https://dashboard-api.tangoeye.ai"
+            dashboard_token    = "${{ secrets.DASHBOARD_TOKEN }}"
+            auth_style         = "bearer"
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText(
+            "${{ github.workspace }}\config.json",
+            $json,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Build EXE
+        run: |
+          pyinstaller --onefile --noconsole --name ops_infra `
+            --add-data "config.json;." `
+            ops_infra.py
+
+      - name: Generate tag
+        id: tag
+        shell: pwsh
+        run: |
+          $ts = (Get-Date -Format "yyyyMMdd-HHmm")
+          echo "TAG=build-$ts" >> $env:GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.TAG }}
+          name: "OPS-Infra · ${{ steps.tag.outputs.TAG }}"
+          make_latest: true
+          files: dist/ops_infra.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

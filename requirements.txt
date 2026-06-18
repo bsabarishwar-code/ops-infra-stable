@@ -1,0 +1,7 @@
+pyinstaller
+requests
+psutil
+ping3
+opencv-python
+Pillow
+urllib3
